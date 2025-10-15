@@ -6,7 +6,7 @@
 # Python imports
 import numpy as np
 import cv2
-import tf_transformations
+# tf_transformations replaced with scipy.spatial.transform
 
 # ROS2 imports
 from rclpy.impl import rcutils_logger
@@ -139,10 +139,12 @@ def my_estimatePoseSingleMarkers(corners, marker_size, camera_matrix, distortion
     rot_matrix = np.eye(4, dtype=np.float32)
     rot_matrix[0:3, 0:3] = rot
 
-    # convert rotation matrix to quaternion
-    quaternion = tf_transformations.quaternion_from_matrix(rot_matrix)
-    norm_quat = np.linalg.norm(quaternion)
-    quaternion = quaternion / norm_quat
+    # convert rotation matrix to quaternion using scipy
+    from scipy.spatial.transform import Rotation as R
+    rotation = R.from_matrix(rot_matrix[0:3, 0:3])
+    quaternion = rotation.as_quat()  # Returns [x, y, z, w]
+    # Convert to [w, x, y, z] format expected by ROS
+    quaternion = np.array([quaternion[3], quaternion[0], quaternion[1], quaternion[2]])
 
     return tvec, rvec, quaternion
 
