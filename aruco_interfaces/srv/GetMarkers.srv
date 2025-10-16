@@ -1,0 +1,8 @@
+# Request: Empty request to trigger marker detection
+---
+
+# Response: Dictionary of marker IDs and their poses
+std_msgs/Header header
+int64[] marker_ids
+geometry_msgs/Pose[] poses
+string[] marker_info  # Additional info like "marker_0", "marker_1", etc.

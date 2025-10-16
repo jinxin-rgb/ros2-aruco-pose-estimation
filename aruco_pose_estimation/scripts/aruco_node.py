@@ -55,6 +55,7 @@ from sensor_msgs.msg import CameraInfo
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseArray
 from aruco_interfaces.msg import ArucoMarkers
+from aruco_interfaces.srv import GetMarkers
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
 
@@ -112,6 +113,13 @@ class ArucoNode(rclpy.node.Node):
         self.poses_pub = self.create_publisher(PoseArray, self.markers_visualization_topic, 10)
         self.markers_pub = self.create_publisher(ArucoMarkers, self.detected_markers_topic, 10)
         self.image_pub = self.create_publisher(Image, self.output_image_topic, 10)
+        
+        # Set up service server
+        self.service = self.create_service(GetMarkers, 'get_markers', self.get_markers_callback)
+        
+        # Store latest detection results for service
+        self.latest_markers = ArucoMarkers()
+        self.latest_poses = PoseArray()
 
         # Set up fields for camera parameters
         self.info_msg = None
@@ -180,6 +188,10 @@ class ArucoNode(rclpy.node.Node):
                                                      marker_size=self.marker_size, matrix_coefficients=self.intrinsic_mat,
                                                      distortion_coefficients=self.distortion, pose_array=pose_array, markers=markers)
 
+        # Store latest results for service
+        self.latest_markers = markers
+        self.latest_poses = pose_array
+
         # if some markers are detected
         if len(markers.marker_ids) > 0:
             # Publish the results with the poses and markes positions
@@ -220,6 +232,10 @@ class ArucoNode(rclpy.node.Node):
                                                      aruco_detector=self.aruco_detector,
                                                      marker_size=self.marker_size, matrix_coefficients=self.intrinsic_mat,
                                                      distortion_coefficients=self.distortion, pose_array=pose_array, markers=markers)
+
+        # Store latest results for service
+        self.latest_markers = markers
+        self.latest_poses = pose_array
 
         # if some markers are detected
         if len(markers.marker_ids) > 0:
@@ -370,6 +386,22 @@ class ArucoNode(rclpy.node.Node):
         self.output_image_topic = (
             self.get_parameter("output_image_topic").get_parameter_value().string_value
         )
+
+    def get_markers_callback(self, request, response):
+        """Service callback to return latest detected markers and poses"""
+        self.get_logger().info("Service called: Getting latest markers")
+        
+        # Copy latest detection results
+        response.header = self.latest_markers.header
+        response.marker_ids = list(self.latest_markers.marker_ids)
+        response.poses = list(self.latest_markers.poses)
+        
+        # Create marker info strings
+        response.marker_info = [f"marker_{marker_id}" for marker_id in response.marker_ids]
+        
+        self.get_logger().info(f"Returning {len(response.marker_ids)} markers: {response.marker_ids}")
+        
+        return response
 
 
 def main():

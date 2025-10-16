@@ -27,6 +27,13 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
     scripts/aruco_node.py
+    scripts/marker_service_client.py
+    DESTINATION lib/${PROJECT_NAME}
+)
+
+# Install test scripts
+install(PROGRAMS
+    ../test_marker_service.py
     DESTINATION lib/${PROJECT_NAME}
 )
 
