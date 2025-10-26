@@ -31,11 +31,11 @@ install(PROGRAMS
     DESTINATION lib/${PROJECT_NAME}
 )
 
-# Install test scripts
-install(PROGRAMS
-    ../test_marker_service.py
-    DESTINATION lib/${PROJECT_NAME}
-)
+# Install test scripts (commented out - file doesn't exist)
+# install(PROGRAMS
+#     ../test_marker_service.py
+#     DESTINATION lib/${PROJECT_NAME}
+# )
 
 # Install directories
 install(DIRECTORY

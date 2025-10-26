@@ -84,8 +84,8 @@ def pose_estimation(rgb_frame: np.array, depth_frame: np.array, aruco_detector: 
                                                         corners=corners[i])
 
                 # log comparison between depthcloud centroid and tvec estimated positions
-                logger.info(f"depthcloud centroid = {centroid}")
-                logger.info(f"tvec = {tvec[0]} {tvec[1]} {tvec[2]}")
+                # logger.info(f"depthcloud centroid = {centroid}")
+                # logger.info(f"tvec = {tvec[0]} {tvec[1]} {tvec[2]}")
 
             # compute pose from the rvec and tvec arrays
             if (depth_frame is not None):
@@ -190,9 +190,12 @@ def depth_to_pointcloud_centroid(depth_image: np.array, intrinsic_matrix: np.arr
     Returns:
         A tuple (x, y, z) representing the centroid of the segmented pointcloud.
     """
+    logger = rcutils_logger.RcutilsLogger(name="aruco_node")
 
     # Get image parameters
     height, width = depth_image.shape
+    logger.debug(f"Depth image shape: {depth_image.shape}, dtype: {depth_image.dtype}")
+    logger.debug(f"Depth image min/max: {depth_image.min()}/{depth_image.max()}")
     
 
     # Check if all corners are within image bounds
@@ -219,7 +222,7 @@ def depth_to_pointcloud_centroid(depth_image: np.array, intrinsic_matrix: np.arr
                 points.append([x, y, depth_image[y, x]])
 
     # Convert points to numpy array
-    points = np.array(points, dtype=np.uint16)
+    points = np.array(points, dtype=np.float32)
    
     # convert to open3d image
     #depth_segmented = geometry.Image(points)
@@ -241,13 +244,20 @@ def depth_to_pointcloud_centroid(depth_image: np.array, intrinsic_matrix: np.arr
     # create pointcloud
     pointcloud = []
     for x, y, d in points:
-        z = d / 1000.0
-        x = (x - intrinsic_matrix[0, 2]) * z / intrinsic_matrix[0, 0]
-        y = (y - intrinsic_matrix[1, 2]) * z / intrinsic_matrix[1, 1]
-        pointcloud.append([x, y, z])
+        if d > 0:  # Only process valid depth values
+            z = d / 1000.0
+            x_3d = (x - intrinsic_matrix[0, 2]) * z / intrinsic_matrix[0, 0]
+            y_3d = (y - intrinsic_matrix[1, 2]) * z / intrinsic_matrix[1, 1]
+            pointcloud.append([x_3d, y_3d, z])
 
     # Calculate centroid from pointcloud
-    centroid = np.mean(np.array(pointcloud, dtype=np.uint16), axis=0)
+    if len(pointcloud) == 0:
+        # No valid depth data, return zeros
+        logger.warn("No valid depth points found in marker region!")
+        centroid = np.array([0.0, 0.0, 0.0])
+    else:
+        centroid = np.mean(np.array(pointcloud, dtype=np.float32), axis=0)
+        logger.debug(f"Valid depth points: {len(pointcloud)}, centroid: {centroid}")
 
     return centroid
 
