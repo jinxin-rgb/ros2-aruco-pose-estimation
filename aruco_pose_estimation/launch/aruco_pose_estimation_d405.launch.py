@@ -18,7 +18,7 @@ def generate_launch_description():
     aruco_params_file = os.path.join(
         get_package_share_directory('aruco_pose_estimation'),
         'config',
-        'aruco_parameters_d405_fixed.yaml'
+        'aruco_parameters.yaml'
     )
 
     with open(aruco_params_file, 'r') as file:
@@ -109,9 +109,6 @@ def generate_launch_description():
             "detected_markers_topic": LaunchConfiguration('detected_markers_topic'),
             "markers_visualization_topic": LaunchConfiguration('markers_visualization_topic'),
             "output_image_topic": LaunchConfiguration('output_image_topic'),
-            # Hardcoded camera parameters
-            "camera_matrix": config['camera_matrix'],
-            "distortion_coefficients": config['distortion_coefficients'],
         }],
         output='screen',
         emulate_tty=True

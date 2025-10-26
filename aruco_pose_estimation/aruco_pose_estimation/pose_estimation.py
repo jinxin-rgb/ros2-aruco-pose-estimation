@@ -6,7 +6,8 @@
 # Python imports
 import numpy as np
 import cv2
-# tf_transformations replaced with scipy.spatial.transform
+import transforms3d
+from scipy.spatial.transform import Rotation as R
 
 # ROS2 imports
 from rclpy.impl import rcutils_logger
@@ -90,20 +91,49 @@ def pose_estimation(rgb_frame: np.array, depth_frame: np.array, aruco_detector: 
             if (depth_frame is not None):
                 # use computed centroid from depthcloud as estimated pose
                 pose = Pose()
-                pose.position.x = float(centroid[0])
-                pose.position.y = float(centroid[1])
-                pose.position.z = float(centroid[2])
+                # Fix coordinate frame: negate x and y
+                pose.position.x = -float(centroid[0])  # Negate x
+                pose.position.y = -float(centroid[1])  # Negate y
+                pose.position.z = float(centroid[2])   # Keep z
             else:
                 # use tvec from aruco estimator as estimated pose
                 pose = Pose()
-                pose.position.x = float(tvec[0])
-                pose.position.y = float(tvec[1])
-                pose.position.z = float(tvec[2])
+                # Fix coordinate frame: negate x and y
+                pose.position.x = -float(tvec[0])  # Negate x
+                pose.position.y = -float(tvec[1])  # Negate y
+                pose.position.z = float(tvec[2])   # Keep z
 
-            pose.orientation.x = quat[0]
-            pose.orientation.y = quat[1]
-            pose.orientation.z = quat[2]
-            pose.orientation.w = quat[3]
+            # Fix orientation coordinate frame: apply coordinate transformation to quaternion
+            # This corrects the rotation axes to match the position coordinate system
+            
+            # Create rotation matrix from original quaternion
+            original_quat = np.array([quat[3], quat[0], quat[1], quat[2]])  # [w, x, y, z]
+            original_rot = R.from_quat(original_quat)
+            original_matrix = original_rot.as_matrix()
+            
+            # Apply coordinate transformation matrix (same as position)
+            # This matrix negates x and y axes to match the position transformation
+            transform_matrix = np.array([
+                [-1, 0, 0],  # Negate x
+                [0, -1, 0],  # Negate y  
+                [0, 0, -1]   # Negate z to fix rotation direction
+            ])
+            
+            # Add 180-degree rotation around X-axis to fix Z-axis rotation direction
+            x_180_rotation = R.from_euler('x', 180, degrees=True)
+            x_180_matrix = x_180_rotation.as_matrix()
+            
+            # Apply transformation to rotation matrix
+            corrected_matrix = x_180_matrix @ transform_matrix @ original_matrix @ transform_matrix.T
+            
+            # Convert back to quaternion
+            corrected_rot = R.from_matrix(corrected_matrix)
+            corrected_quat = corrected_rot.as_quat()  # [x, y, z, w]
+            
+            pose.orientation.x = corrected_quat[0]
+            pose.orientation.y = corrected_quat[1] 
+            pose.orientation.z = corrected_quat[2]
+            pose.orientation.w = corrected_quat[3]
 
             # add the pose and marker id to the pose_array and markers messages
             pose_array.poses.append(pose)
@@ -139,12 +169,10 @@ def my_estimatePoseSingleMarkers(corners, marker_size, camera_matrix, distortion
     rot_matrix = np.eye(4, dtype=np.float32)
     rot_matrix[0:3, 0:3] = rot
 
-    # convert rotation matrix to quaternion using scipy
-    from scipy.spatial.transform import Rotation as R
-    rotation = R.from_matrix(rot_matrix[0:3, 0:3])
-    quaternion = rotation.as_quat()  # Returns [x, y, z, w]
-    # Convert to [w, x, y, z] format expected by ROS
-    quaternion = np.array([quaternion[3], quaternion[0], quaternion[1], quaternion[2]])
+    # convert rotation matrix to quaternion (use only 3x3 rotation part)
+    quaternion = transforms3d.quaternions.mat2quat(rot_matrix[0:3, 0:3])
+    norm_quat = np.linalg.norm(quaternion)
+    quaternion = quaternion / norm_quat
 
     return tvec, rvec, quaternion
 
