@@ -55,6 +55,7 @@ from sensor_msgs.msg import CameraInfo
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PoseArray
 from aruco_interfaces.msg import ArucoMarkers
+from aruco_interfaces.srv import GetMarkers
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
 
@@ -112,6 +113,13 @@ class ArucoNode(rclpy.node.Node):
         self.poses_pub = self.create_publisher(PoseArray, self.markers_visualization_topic, 10)
         self.markers_pub = self.create_publisher(ArucoMarkers, self.detected_markers_topic, 10)
         self.image_pub = self.create_publisher(Image, self.output_image_topic, 10)
+        
+        # Set up service server
+        self.service = self.create_service(GetMarkers, 'get_markers', self.get_markers_callback)
+        
+        # Store latest detection results for service
+        self.latest_markers = ArucoMarkers()
+        self.latest_poses = PoseArray()
 
         # Set up fields for camera parameters
         self.info_msg = None
@@ -132,8 +140,32 @@ class ArucoNode(rclpy.node.Node):
     def info_callback(self, info_msg):
         self.info_msg = info_msg
         # get the intrinsic matrix and distortion coefficients from the camera info
-        self.intrinsic_mat = np.reshape(np.array(self.info_msg.k), (3, 3))
-        self.distortion = np.array(self.info_msg.d)
+        try:
+            # Validate that camera matrix K has 9 elements (3x3 matrix)
+            if len(info_msg.k) != 9:
+                self.get_logger().error(f"Invalid camera matrix K: expected 9 elements, got {len(info_msg.k)}")
+                return
+            
+            self.intrinsic_mat = np.reshape(np.array(info_msg.k), (3, 3))
+            self.distortion = np.array(info_msg.d)
+            
+            # Validate intrinsic matrix shape
+            if self.intrinsic_mat.shape != (3, 3):
+                self.get_logger().error(f"Invalid camera intrinsic matrix shape: {self.intrinsic_mat.shape}. Expected (3, 3).")
+                self.intrinsic_mat = None
+                return
+            
+            # Validate that matrix is not all zeros
+            if np.allclose(self.intrinsic_mat, 0):
+                self.get_logger().error("Camera intrinsic matrix is all zeros - invalid calibration!")
+                self.intrinsic_mat = None
+                return
+                
+        except Exception as e:
+            self.get_logger().error(f"Error processing camera info: {e}")
+            self.intrinsic_mat = None
+            self.distortion = None
+            return
 
         self.get_logger().info("Camera info received.")
         self.get_logger().info("Intrinsic matrix: {}".format(self.intrinsic_mat))
@@ -146,6 +178,15 @@ class ArucoNode(rclpy.node.Node):
     def image_callback(self, img_msg: Image):
         if self.info_msg is None:
             self.get_logger().warn("No camera info has been received!")
+            return
+        
+        if self.intrinsic_mat is None:
+            self.get_logger().warn("Camera intrinsic matrix is not available! Skipping frame.")
+            return
+        
+        # Validate intrinsic matrix dimensions
+        if self.intrinsic_mat.shape != (3, 3):
+            self.get_logger().warn(f"Invalid camera intrinsic matrix shape: {self.intrinsic_mat.shape}. Expected (3, 3). Skipping frame.")
             return
 
         # convert the image messages to cv2 format
@@ -180,6 +221,10 @@ class ArucoNode(rclpy.node.Node):
                                                      marker_size=self.marker_size, matrix_coefficients=self.intrinsic_mat,
                                                      distortion_coefficients=self.distortion, pose_array=pose_array, markers=markers)
 
+        # Store latest results for service
+        self.latest_markers = markers
+        self.latest_poses = pose_array
+
         # if some markers are detected
         if len(markers.marker_ids) > 0:
             # Publish the results with the poses and markes positions
@@ -195,6 +240,19 @@ class ArucoNode(rclpy.node.Node):
             return
 
     def rgb_depth_sync_callback(self, rgb_msg: Image, depth_msg: Image):
+        # Check if camera info has been received and is valid
+        if self.info_msg is None:
+            self.get_logger().warn("No camera info has been received! Skipping frame.")
+            return
+        
+        if self.intrinsic_mat is None:
+            self.get_logger().warn("Camera intrinsic matrix is not available! Skipping frame.")
+            return
+        
+        # Validate intrinsic matrix dimensions
+        if self.intrinsic_mat.shape != (3, 3):
+            self.get_logger().warn(f"Invalid camera intrinsic matrix shape: {self.intrinsic_mat.shape}. Expected (3, 3). Skipping frame.")
+            return
 
         # convert the image messages to cv2 format
         cv_depth_image = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding="16UC1")
@@ -220,6 +278,10 @@ class ArucoNode(rclpy.node.Node):
                                                      aruco_detector=self.aruco_detector,
                                                      marker_size=self.marker_size, matrix_coefficients=self.intrinsic_mat,
                                                      distortion_coefficients=self.distortion, pose_array=pose_array, markers=markers)
+
+        # Store latest results for service
+        self.latest_markers = markers
+        self.latest_poses = pose_array
 
         # if some markers are detected
         if len(markers.marker_ids) > 0:
@@ -370,6 +432,22 @@ class ArucoNode(rclpy.node.Node):
         self.output_image_topic = (
             self.get_parameter("output_image_topic").get_parameter_value().string_value
         )
+
+    def get_markers_callback(self, request, response):
+        """Service callback to return latest detected markers and poses"""
+        self.get_logger().info("Service called: Getting latest markers")
+        
+        # Copy latest detection results
+        response.header = self.latest_markers.header
+        response.marker_ids = list(self.latest_markers.marker_ids)
+        response.poses = list(self.latest_markers.poses)
+        
+        # Create marker info strings
+        response.marker_info = [f"marker_{marker_id}" for marker_id in response.marker_ids]
+        
+        self.get_logger().info(f"Returning {len(response.marker_ids)} markers: {response.marker_ids}")
+        
+        return response
 
 
 def main():
