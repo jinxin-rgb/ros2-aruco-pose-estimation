@@ -140,8 +140,32 @@ class ArucoNode(rclpy.node.Node):
     def info_callback(self, info_msg):
         self.info_msg = info_msg
         # get the intrinsic matrix and distortion coefficients from the camera info
-        self.intrinsic_mat = np.reshape(np.array(self.info_msg.k), (3, 3))
-        self.distortion = np.array(self.info_msg.d)
+        try:
+            # Validate that camera matrix K has 9 elements (3x3 matrix)
+            if len(info_msg.k) != 9:
+                self.get_logger().error(f"Invalid camera matrix K: expected 9 elements, got {len(info_msg.k)}")
+                return
+            
+            self.intrinsic_mat = np.reshape(np.array(info_msg.k), (3, 3))
+            self.distortion = np.array(info_msg.d)
+            
+            # Validate intrinsic matrix shape
+            if self.intrinsic_mat.shape != (3, 3):
+                self.get_logger().error(f"Invalid camera intrinsic matrix shape: {self.intrinsic_mat.shape}. Expected (3, 3).")
+                self.intrinsic_mat = None
+                return
+            
+            # Validate that matrix is not all zeros
+            if np.allclose(self.intrinsic_mat, 0):
+                self.get_logger().error("Camera intrinsic matrix is all zeros - invalid calibration!")
+                self.intrinsic_mat = None
+                return
+                
+        except Exception as e:
+            self.get_logger().error(f"Error processing camera info: {e}")
+            self.intrinsic_mat = None
+            self.distortion = None
+            return
 
         self.get_logger().info("Camera info received.")
         self.get_logger().info("Intrinsic matrix: {}".format(self.intrinsic_mat))
@@ -154,6 +178,15 @@ class ArucoNode(rclpy.node.Node):
     def image_callback(self, img_msg: Image):
         if self.info_msg is None:
             self.get_logger().warn("No camera info has been received!")
+            return
+        
+        if self.intrinsic_mat is None:
+            self.get_logger().warn("Camera intrinsic matrix is not available! Skipping frame.")
+            return
+        
+        # Validate intrinsic matrix dimensions
+        if self.intrinsic_mat.shape != (3, 3):
+            self.get_logger().warn(f"Invalid camera intrinsic matrix shape: {self.intrinsic_mat.shape}. Expected (3, 3). Skipping frame.")
             return
 
         # convert the image messages to cv2 format
@@ -207,6 +240,19 @@ class ArucoNode(rclpy.node.Node):
             return
 
     def rgb_depth_sync_callback(self, rgb_msg: Image, depth_msg: Image):
+        # Check if camera info has been received and is valid
+        if self.info_msg is None:
+            self.get_logger().warn("No camera info has been received! Skipping frame.")
+            return
+        
+        if self.intrinsic_mat is None:
+            self.get_logger().warn("Camera intrinsic matrix is not available! Skipping frame.")
+            return
+        
+        # Validate intrinsic matrix dimensions
+        if self.intrinsic_mat.shape != (3, 3):
+            self.get_logger().warn(f"Invalid camera intrinsic matrix shape: {self.intrinsic_mat.shape}. Expected (3, 3). Skipping frame.")
+            return
 
         # convert the image messages to cv2 format
         cv_depth_image = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding="16UC1")
